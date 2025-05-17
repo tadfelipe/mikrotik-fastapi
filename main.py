@@ -1,3 +1,26 @@
+import re
+import logging
+
+# 1) Defina o Filter que vai redigir username e password
+class CredentialFilter(logging.Filter):
+    def filter(self, record):
+        # Aplica regex sobre a mensagem completa
+        redacted = re.sub(
+            r"(username=|password=)[^&\s]+",
+            r"\1******",
+            record.getMessage()
+        )
+        record.msg = redacted
+        record.args = None
+        return True
+
+# 2) Anexe o filtro ao logger de access do Uvicorn
+logging.getLogger("uvicorn.access").addFilter(CredentialFilter())
+# (Opcional: para o logger de erros também)
+# logging.getLogger("uvicorn.error").addFilter(CredentialFilter())
+
+logging.getLogger("routeros_api").addFilter(CredentialFilter())
+import logging
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import FileResponse
 from models import MikrotikAuth, NatRule, AddressListEntry, FilterRule, DnsEntry
@@ -20,11 +43,13 @@ def list_interfaces(api_pool=Depends(with_api)):
     result = api.get_resource("/interface").get()
     pool.disconnect()
     return result
-
 @app.get("/nat")
-def list_nat(api_pool=Depends(with_api)):
-    api, pool, _ = api_pool
+def list_nat(api_pool=Depends(with_api), comment: str = None):
+    api, pool, auth = api_pool
+    logging.info(f"Conectando ao MikroTik com o host: {auth.host}")
     rules = api.get_resource("/ip/firewall/nat").get()
+    if comment:
+        rules = [rule for rule in rules if comment.lower() in rule.get("comment", "").lower()]
     pool.disconnect()
     return rules
 
@@ -43,9 +68,11 @@ def delete_nat(rule_id: str, api_pool=Depends(with_api)):
     return {"success": True}
 
 @app.get("/address-list")
-def list_address_list(api_pool=Depends(with_api)):
+def list_address_list(api_pool=Depends(with_api), comment: str = None):
     api, pool, _ = api_pool
     lst = api.get_resource("/ip/firewall/address-list").get()
+    if comment:
+        lst = [entry for entry in lst if comment.lower() in entry.get("comment", "").lower()]
     pool.disconnect()
     return lst
 
@@ -64,9 +91,11 @@ def delete_address_list(entry_id: str, api_pool=Depends(with_api)):
     return {"success": True}
 
 @app.get("/filter")
-def list_filter(api_pool=Depends(with_api)):
+def list_filter(api_pool=Depends(with_api), comment: str = None):
     api, pool, _ = api_pool
     rules = api.get_resource("/ip/firewall/filter").get()
+    if comment:
+        rules = [rule for rule in rules if comment.lower() in rule.get("comment", "").lower()]
     pool.disconnect()
     return rules
 
@@ -85,9 +114,11 @@ def delete_filter(rule_id: str, api_pool=Depends(with_api)):
     return {"success": True}
 
 @app.get("/dns")
-def list_dns(api_pool=Depends(with_api)):
+def list_dns(api_pool=Depends(with_api), comment: str = None):
     api, pool, _ = api_pool
     entries = api.get_resource("/ip/dns/static").get()
+    if comment:
+        entries = [entry for entry in entries if comment.lower() in entry.get("comment", "").lower()]
     pool.disconnect()
     return entries
 
